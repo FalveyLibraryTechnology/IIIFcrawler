@@ -34,15 +34,19 @@ $mime = isset($argv[2]) ? $argv[2] : 'image/jpeg';
 
 // Create the crawler
 $crawler = new Crawler($url, $mime);
-$harvested = $crawler->crawl();
+$data = $crawler->crawl(__DIR__);
+extract($data);
 $errors = $crawler->getErrors();
 
 // Done! Report results.
-echo "$harvested $mime file(s) harvested.\n";
+echo "$harvested $mime file(s) harvested from $urlCount URL(s).\n";
 if (!empty($errors)) {
     echo "ERRORS:\n" . implode("\n", $errors) . "\n";
 }
 
+/**
+ * Crawler class.
+ */
 class Crawler
 {
     /**
@@ -74,7 +78,14 @@ class Crawler
     protected $errors = [];
 
     /**
-     * Harvest count
+     * Retrieved URL count
+     *
+     * @var int
+     */
+    protected $urlCount = 0;
+
+    /**
+     * Harvested file count
      *
      * @var int
      */
@@ -94,24 +105,27 @@ class Crawler
     }
 
     /**
-     * Start the crawling process; return the count of files harvested.
+     * Start the crawling process; return array of statistical data.
      *
-     * @return int
+     * @param string $targetDir Directory to harvest files into.
+     *
+     * @return array
      */
-    public function crawl()
+    public function crawl($targetDir)
     {
-        $this->getUrl($this->startUrl);
-        return $this->harvested;
+        $this->getUrl($this->startUrl, $targetDir);
+        return ['harvested' => $this->harvested, 'urlCount' => $this->urlCount];
     }
 
     /**
      * Retrieve the contents of a URL.
      *
-     * @param string $url URL to fetch.
+     * @param string $url       URL to fetch.
+     * @param string $targetDir Directory to harvest files into.
      *
      * @return void
      */
-    protected function getUrl($url)
+    protected function getUrl($url, $targetDir)
     {
         // Load the JSON
         if (!$json = file_get_contents($url)) {
@@ -123,13 +137,76 @@ class Crawler
             return $this->addError("Problem decoding JSON from $url.\n");
         }
 
-        // Validate the JSON
-        if (!isset($data->sequences) || !is_array($data->sequences)
-            || empty($data->sequences)
+        // Increment counter
+        $this->urlCount++;
+
+        // Detect collections or sequences within the data:
+        $members = $this->checkForCollectionMembers($data);
+        if (!empty($members)) {
+            return $this->harvestCollection($members, $targetDir);
+        }
+        if (isset($data->sequences) && is_array($data->sequences)
+            && !empty($data->sequences)
         ) {
-            return $this->addError("No sequences found in manifest.\n");
+            return $this->harvestFromManifest($data, $targetDir);
         }
 
+        // If we found nothing, fail:
+        return $this->addError("No collections or sequences found in manifest.\n");
+    }
+
+    /**
+     * Given JSON extracted from a IIIF URL, check for collection contents. Return an
+     * empty array if nothing relevant is found.
+     *
+     * @param array $data Raw JSON data.
+     *
+     * @return array
+     */
+    protected function checkForCollectionMembers($data)
+    {
+        $members = isset($data->members) && is_array($data->members)
+            ? $data->members : [];
+        if (isset($data->collections) && is_array($data->collections)) {
+            $members = array_merge($members, $data->collections);
+        }
+        if (isset($data->manifests) && is_array($data->manifests)) {
+            $members = array_merge($members, $data->manifests);
+        }
+        return $members;
+    }
+
+    /**
+     * Given JSON extracted from a IIIF collection, harvest all sub-parts.
+     *
+     * @param array  $members   Members to harvest.
+     * @param string $targetDir Directory to harvest files into.
+     *
+     * @return void
+     */
+    protected function harvestCollection($members, $targetDir)
+    {
+        $prefix = 0;
+        foreach ($members as $member) {
+            $dirName = preg_replace('/[^a-zA-Z0-9-_]+/', '_', $member->label);
+            $newTarget = $targetDir . '/' . str_pad($prefix, 10, '0', STR_PAD_LEFT) . '-' . $dirName;
+            mkdir($newTarget);
+            echo "Loading collection content: " . $member->{'@id'} . "\n";
+            $this->getUrl($member->{'@id'}, $newTarget);
+            $prefix++;
+        }
+    }
+
+    /**
+     * Given JSON data representing a manifest, harvest all images.
+     *
+     * @param array  $data      Manifest data
+     * @param string $targetDir Directory to harvest files into.
+     *
+     * @return void
+     */
+    protected function harvestFromManifest($data, $targetDir)
+    {
         // Loop through sequences
         foreach ($data->sequences as $seqNum => $sequence) {
             if (!isset($sequence->canvases) || !is_array($sequence->canvases)
@@ -141,7 +218,7 @@ class Crawler
             // Loop through canvases
             foreach ($sequence->canvases as $canvNum => $canvas) {
                 // Grab the next file
-                $nextFilename = $this->getFilename($seqNum, $canvNum);
+                $nextFilename = $targetDir . '/' . $this->getFilename($seqNum, $canvNum);
                 if (!$this->saveMatchingFile($canvas, $nextFilename)) {
                     echo "No matching {$this->mime} found for sequence $seqNum, canvas $canvNum\n";
                 } else {
@@ -184,6 +261,8 @@ class Crawler
     protected function getExtensionFromMime($mime)
     {
         switch ($mime) {
+        case 'image/tiff':
+            return 'tif';
         case 'image/jpeg':
             return 'jpg';
         case 'text/plain':
