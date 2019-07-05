@@ -32,110 +32,207 @@ if (empty($url)) {
 // Default MIME parameter to image/jpeg if not supplied
 $mime = isset($argv[2]) ? $argv[2] : 'image/jpeg';
 
-// Load the JSON
-if (!$json = file_get_contents($url)) {
-    die("Problem retrieving $url.\n");
-}
-
-// Parse the JSON
-if (!$data = json_decode($json)) {
-    die("Problem decoding JSON.\n");
-}
-
-// Validate the JSON
-if (!isset($data->sequences) || !is_array($data->sequences)
-    || empty($data->sequences)
-) {
-    die("No sequences found in manifest.\n");
-}
-
-// Initialize harvest counter
-$harvested = 0;
-
-// Loop through sequences
-foreach ($data->sequences as $seqNum => $sequence) {
-    if (!isset($sequence->canvases) || !is_array($sequence->canvases)
-        || empty($sequence->canvases)
-    ) {
-        echo "No canvases found in sequence $seqNum.\n";
-        continue;
-    }
-    // Loop through canvases
-    foreach ($sequence->canvases as $canvNum => $canvas) {
-        // Grab the next file
-        $nextFilename = getFilename($seqNum, $canvNum, getExtensionFromMime($mime));
-        if (!saveMatchingFile($canvas, $nextFilename, $mime)) {
-            echo "No matching $mime found for sequence $seqNum, canvas $canvNum\n";
-        } else {
-            echo "Saved $nextFilename\n";
-            $harvested++;
-        }
-    }
-}
+// Create the crawler
+$crawler = new Crawler($url, $mime);
+$harvested = $crawler->crawl();
+$errors = $crawler->getErrors();
 
 // Done! Report results.
 echo "$harvested $mime file(s) harvested.\n";
+if (!empty($errors)) {
+    echo "ERRORS:\n" . implode("\n", $errors) . "\n";
+}
 
-/**
- * Return a file extension for the given MIME type.
- *
- * @param string $mime MIME type
- *
- * @return string
- */
-function getExtensionFromMime($mime)
+class Crawler
 {
-    switch ($mime) {
-    case 'image/jpeg':
-        return 'jpg';
-    case 'text/plain':
-        return 'txt';
-    default:
-        return 'bin';
+    /**
+     * Starting point URL
+     *
+     * @var string
+     */
+    protected $startUrl;
+
+    /**
+     * MIME type to harvest
+     *
+     * @var string
+     */
+    protected $mime;
+
+    /**
+     * File extension to use on saved files
+     *
+     * @var string
+     */
+    protected $extension;
+
+    /**
+     * Error list
+     *
+     * @var array
+     */
+    protected $errors = [];
+
+    /**
+     * Harvest count
+     *
+     * @var int
+     */
+    protected $harvested = 0;
+
+    /**
+     * Constructor
+     *
+     * @param string $url  Starting point URL
+     * @param string $mime MIME type to harvest
+     */
+    public function __construct($url, $mime)
+    {
+        $this->startUrl = $url;
+        $this->mime = $mime;
+        $this->extension = $this->getExtensionFromMime($mime);
     }
-}
 
-/**
- * Determine a filename based on sequence and canvas numbers.
- *
- * @param int    $seqNum    Sequence number
- * @param int    $canvNum   Canvas number
- * @param string $extension File extension to use
- *
- * @return string
- */
-function getFilename($seqNum, $canvNum, $extension)
-{
-    return str_pad($seqNum, 10, '0', STR_PAD_LEFT) . '-'
-        . str_pad($canvNum, 10, '0', STR_PAD_LEFT) . '.' . $extension;
-}
+    /**
+     * Start the crawling process; return the count of files harvested.
+     *
+     * @return int
+     */
+    public function crawl()
+    {
+        $this->getUrl($this->startUrl);
+        return $this->harvested;
+    }
 
-/**
- * Extract a file matching a mime type from a canvas and save it to disk.
- * Return true if match found, false otherwise.
- *
- * @param array  $canvas Canvas to search
- * @param string $file   Filename to save
- * @param string $mime   MIME type to find
- *
- * @return bool
- */
-function saveMatchingFile($canvas, $file, $mime)
-{
-    foreach (['images', 'rendering'] as $section) {
-        if (isset($canvas->$section) && is_array($canvas->$section)) {
-            foreach ($canvas->$section as $item) {
-                if ($section == 'images') {
-                    $item = $item->resource;
-                }
-                if (isset($item->format) && $item->format == $mime
-                    && isset($item->{'@id'})
-                ) {
-                    file_put_contents($file, file_get_contents($item->{'@id'}));
-                    return true;
+    /**
+     * Retrieve the contents of a URL.
+     *
+     * @param string $url URL to fetch.
+     *
+     * @return void
+     */
+    protected function getUrl($url)
+    {
+        // Load the JSON
+        if (!$json = file_get_contents($url)) {
+            return $this->addError("Problem retrieving $url.\n");
+        }
+
+        // Parse the JSON
+        if (!$data = json_decode($json)) {
+            return $this->addError("Problem decoding JSON from $url.\n");
+        }
+
+        // Validate the JSON
+        if (!isset($data->sequences) || !is_array($data->sequences)
+            || empty($data->sequences)
+        ) {
+            return $this->addError("No sequences found in manifest.\n");
+        }
+
+        // Loop through sequences
+        foreach ($data->sequences as $seqNum => $sequence) {
+            if (!isset($sequence->canvases) || !is_array($sequence->canvases)
+                || empty($sequence->canvases)
+            ) {
+                echo "No canvases found in sequence $seqNum.\n";
+                continue;
+            }
+            // Loop through canvases
+            foreach ($sequence->canvases as $canvNum => $canvas) {
+                // Grab the next file
+                $nextFilename = $this->getFilename($seqNum, $canvNum);
+                if (!$this->saveMatchingFile($canvas, $nextFilename)) {
+                    echo "No matching {$this->mime} found for sequence $seqNum, canvas $canvNum\n";
+                } else {
+                    echo "Saved $nextFilename\n";
+                    $this->harvested++;
                 }
             }
         }
     }
-    return false;
+
+    /**
+     * Log an error.
+     *
+     * @param string $error Message to log
+     *
+     * @return void
+     */
+    protected function addError($error)
+    {
+        $this->errors[] = $error;
+    }
+
+    /**
+     * Get the logged errors.
+     *
+     * @return array
+     */
+    public function getErrors()
+    {
+        return $this->errors;
+    }
+
+    /**
+     * Return a file extension for the given MIME type.
+     *
+     * @param string $mime MIME type
+     *
+     * @return string
+     */
+    protected function getExtensionFromMime($mime)
+    {
+        switch ($mime) {
+        case 'image/jpeg':
+            return 'jpg';
+        case 'text/plain':
+            return 'txt';
+        default:
+            return 'bin';
+        }
+    }
+
+    /**
+     * Determine a filename based on sequence and canvas numbers.
+     *
+     * @param int    $seqNum  Sequence number
+     * @param int    $canvNum Canvas number
+     *
+     * @return string
+     */
+    protected function getFilename($seqNum, $canvNum)
+    {
+        return str_pad($seqNum, 10, '0', STR_PAD_LEFT) . '-'
+            . str_pad($canvNum, 10, '0', STR_PAD_LEFT) . '.' . $this->extension;
+    }
+
+    /**
+     * Extract a file matching a mime type from a canvas and save it to disk.
+     * Return true if match found, false otherwise.
+     *
+     * @param array  $canvas Canvas to search
+     * @param string $file   Filename to save
+     *
+     * @return bool
+     */
+    protected function saveMatchingFile($canvas, $file)
+    {
+        foreach (['images', 'rendering'] as $section) {
+            if (isset($canvas->$section) && is_array($canvas->$section)) {
+                foreach ($canvas->$section as $item) {
+                    if ($section == 'images') {
+                        $item = $item->resource;
+                    }
+                    if (isset($item->format) && $item->format == $this->mime
+                        && isset($item->{'@id'})
+                    ) {
+                        file_put_contents($file, file_get_contents($item->{'@id'}));
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
 }
