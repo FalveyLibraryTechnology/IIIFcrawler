@@ -34,7 +34,7 @@ $mime = isset($argv[2]) ? $argv[2] : 'image/jpeg';
 
 // Create the crawler
 $crawler = new Crawler($url, $mime);
-$data = $crawler->crawl(__DIR__);
+$data = $crawler->crawl(getcwd());
 extract($data);
 $errors = $crawler->getErrors();
 
