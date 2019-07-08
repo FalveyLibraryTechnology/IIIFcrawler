@@ -190,7 +190,9 @@ class Crawler
         foreach ($members as $member) {
             $dirName = preg_replace('/[^a-zA-Z0-9-_]+/', '_', $member->label);
             $newTarget = $targetDir . '/' . str_pad($prefix, 10, '0', STR_PAD_LEFT) . '-' . $dirName;
-            mkdir($newTarget);
+            if (!file_exists($newTarget) && !is_dir($newTarget)) {
+                mkdir($newTarget);
+            }
             echo "Loading collection content: " . $member->{'@id'} . "\n";
             $this->getUrl($member->{'@id'}, $newTarget);
             $prefix++;
@@ -306,7 +308,11 @@ class Crawler
                     if (isset($item->format) && $item->format == $this->mime
                         && isset($item->{'@id'})
                     ) {
-                        file_put_contents($file, file_get_contents($item->{'@id'}));
+                        if (file_exists($file)) {
+                            echo "$file already exists; skipping...\n";
+                        } else {
+                            file_put_contents($file, file_get_contents($item->{'@id'}));
+                        }
                         return true;
                     }
                 }
