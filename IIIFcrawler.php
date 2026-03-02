@@ -145,10 +145,11 @@ class Crawler
         if (!empty($members)) {
             return $this->harvestCollection($members, $targetDir);
         }
-        if (isset($data->sequences) && is_array($data->sequences)
-            && !empty($data->sequences)
-        ) {
-            return $this->harvestFromManifest($data, $targetDir);
+        if (!empty($data->sequences) && is_array($data->sequences)) {
+            return $this->harvestFromV2Manifest($data, $targetDir);
+        }
+        if (!empty($data->items) && is_array($data->items)) {
+            return $this->harvestFromV3Manifest($data, $targetDir);
         }
 
         // If we found nothing, fail:
@@ -200,14 +201,14 @@ class Crawler
     }
 
     /**
-     * Given JSON data representing a manifest, harvest all images.
+     * Given JSON data representing a v2 manifest, harvest all images.
      *
      * @param array  $data      Manifest data
      * @param string $targetDir Directory to harvest files into.
      *
      * @return void
      */
-    protected function harvestFromManifest($data, $targetDir)
+    protected function harvestFromV2Manifest($data, $targetDir)
     {
         // Loop through sequences
         foreach ($data->sequences as $seqNum => $sequence) {
@@ -227,6 +228,29 @@ class Crawler
                     echo "Saved $nextFilename\n";
                     $this->harvested++;
                 }
+            }
+        }
+    }
+
+    /**
+     * Given JSON data representing a v3 manifest, harvest all images.
+     *
+     * @param array  $data      Manifest data
+     * @param string $targetDir Directory to harvest files into.
+     *
+     * @return void
+     */
+    protected function harvestFromV3Manifest($data, $targetDir)
+    {
+        // Loop through canvases
+        foreach ($data->items as $canvNum => $canvas) {
+            // Grab the next file
+            $nextFilename = $targetDir . '/' . $this->getFilename(0, $canvNum);
+            if (!$this->saveMatchingFile($canvas, $nextFilename)) {
+                echo "No matching {$this->mime} found for canvas $canvNum\n";
+            } else {
+                echo "Saved $nextFilename\n";
+                $this->harvested++;
             }
         }
     }
@@ -299,19 +323,22 @@ class Crawler
      */
     protected function saveMatchingFile($canvas, $file)
     {
-        foreach (['images', 'rendering'] as $section) {
+        foreach (['images', 'items', 'rendering'] as $section) {
             if (isset($canvas->$section) && is_array($canvas->$section)) {
                 foreach ($canvas->$section as $item) {
                     if ($section == 'images') {
                         $item = $item->resource;
                     }
-                    if (isset($item->format) && $item->format == $this->mime
-                        && isset($item->{'@id'})
-                    ) {
+                    if ($section == 'items') {
+                        $item = $item->items[0];
+                    }
+                    $itemId = $item->{'@id'} ?? $item->id ?? null;
+                    $format = $item->format ?? $item->body->format ?? null;
+                    if ($format == $this->mime && $itemId) {
                         if (file_exists($file)) {
                             echo "$file already exists; skipping...\n";
                         } else {
-                            file_put_contents($file, file_get_contents($item->{'@id'}));
+                            file_put_contents($file, file_get_contents($itemId));
                         }
                         return true;
                     }
