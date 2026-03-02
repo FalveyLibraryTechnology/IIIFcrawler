@@ -2,9 +2,9 @@
 /**
  * IIIF Crawler - See README.md for details.
  *
- * PHP version 5.4
+ * PHP version 8
  *
- * Copyright (C) Villanova University 2015.
+ * Copyright (C) Villanova University 2015-2026.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2,
@@ -16,8 +16,8 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * along with this program; if not, see
+ * <https://www.gnu.org/licenses/>.
  *
  * @author   Demian Katz <demian.katz@villanova.edu>
  * @license  http://opensource.org/licenses/gpl-2.0.php GNU General Public License
