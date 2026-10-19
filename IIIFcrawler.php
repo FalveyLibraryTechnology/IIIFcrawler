@@ -174,6 +174,9 @@ class Crawler
         if (isset($data->manifests) && is_array($data->manifests)) {
             $members = array_merge($members, $data->manifests);
         }
+        if (($data->type ?? '') === 'Collection' && isset($data->items[0]->id)) {
+            $members = array_merge($members, $data->items);
+        }
         return $members;
     }
 
@@ -189,13 +192,14 @@ class Crawler
     {
         $prefix = 0;
         foreach ($members as $member) {
-            $dirName = preg_replace('/[^a-zA-Z0-9-_]+/', '_', $member->label);
+            $dirName = preg_replace('/[^a-zA-Z0-9-_]+/', '_', $member->label->en[0] ?? $member->label);
             $newTarget = $targetDir . '/' . str_pad($prefix, 10, '0', STR_PAD_LEFT) . '-' . $dirName;
             if (!file_exists($newTarget) && !is_dir($newTarget)) {
                 mkdir($newTarget);
             }
-            echo "Loading collection content: " . $member->{'@id'} . "\n";
-            $this->getUrl($member->{'@id'}, $newTarget);
+            $url = $member->{'@id'} ?? $member->id;
+            echo "Loading collection content: $url\n";
+            $this->getUrl($url, $newTarget);
             $prefix++;
         }
     }
